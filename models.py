@@ -18,7 +18,7 @@ class LoginDetails(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String(255))
-    password = Column(String(255))
+    token = Column(String(255))
     timezone = Column(String(255))
 
 

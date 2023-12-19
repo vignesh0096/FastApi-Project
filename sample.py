@@ -2,11 +2,14 @@ from fastapi import FastAPI,HTTPException,Depends
 from pydantic import BaseModel,Field
 from uuid import UUID
 import models
+from sqlalchemy import desc
 from db import engine,Session_local
 from sqlalchemy.orm import Session
 from otp import get_otp
 from datetime import datetime
 import bcrypt
+from auth_handler import *
+from auth_bearer import *
 
 
 app = FastAPI()
@@ -46,9 +49,9 @@ class Login(BaseModel):
 user_list = []
 
 
-@app.get("/")
-def read_me(db:Session = Depends(get_db)):
-    return db.query(models.Users).all()
+# @app.get("/")
+# def read_me(db:Session = Depends(get_db)):
+#     return db.query(models.Users).all()
 
 
 @app.get("/{user_id}")
@@ -108,27 +111,41 @@ def create(user: Create_user,db:Session = Depends(get_db)):
 @app.post('/login')
 def login(user:Login,db:Session = Depends(get_db)):
     try:
+        token = ''
         user_details = models.LoginDetails()
         check = db.query(models.Users).filter(models.Users.email == user.email).first()
-        print(check.password)
         if check is None:
             raise HTTPException(status_code=404,detail="email id not registered")
         password = user.password
         hashed_password = check.password
         if bcrypt.checkpw(password.encode('utf-8'),hashed_password.encode('utf-8')):
             user_details.email = user.email
-            user_details.password = check.password
+            token = signJWT(check.id)
+            user_details.token = token['access_token']
             user_details.timezone = str(datetime.now())
             db.add(user_details)
             db.commit()
         # else:
         #     raise HTTPException(status_code=401,detail="Enter valid password")
-        return "logged in successfully"
+        return f"token : {token['access_token']}"
     except:
         raise HTTPException(status_code=404,detail="Something went wrong please try again")
 
 
-@app.put('/{user_id}')
+@app.put('/logout')
+def logout(email:str,db:Session = Depends(get_db)):
+    query = (db.query(models.LoginDetails)
+             .filter(models.LoginDetails.email == email)
+             .order_by(desc(models.LoginDetails.timezone))).first()
+    if query:
+        query.token = ''
+        db.add(query)
+        db.commit()
+        return "logged out successfully"
+    return "Something went wrong"
+
+
+@app.put('/{user_id}',dependencies=[Depends(JWTBearer())])
 def edit(user_id : int, user:Create_user,db:Session = Depends(get_db)):
     user_details = db.query(models.Users).filter(models.Users.id == user_id).first()
     if user_details is None:
@@ -137,14 +154,15 @@ def edit(user_id : int, user:Create_user,db:Session = Depends(get_db)):
     user_details.name = user.name
     user_details.phone_no = user.phone_no
     user_details.email = user.email
-    user_details.password = user.password
-    user_details.place = user.places
+    hashed_password = bcrypt.hashpw(user.password.encode('utf-8'),bcrypt.gensalt())
+    user_details.password = hashed_password
+    user_details.place = user.place
     db.add(user_details)
     db.commit()
     return f"user id {user_id} has been successfully updated"
 
 
-@app.delete('/{user_id}')
+@app.delete('/{user_id}',dependencies=[Depends(JWTBearer())])
 def delete(user_id : int,db:Session = Depends(get_db)):
     del_user = db.query(models.Users).filter(models.Users.id == user_id).first()
     if del_user is None:
