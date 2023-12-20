@@ -1,9 +1,8 @@
-from fastapi import FastAPI,HTTPException,Depends
-from pydantic import BaseModel,Field
-from uuid import UUID
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, Field
 import models
 from sqlalchemy import desc
-from db import engine,Session_local
+from db import engine, Session_local,get_db
 from sqlalchemy.orm import Session
 from otp import get_otp
 from datetime import datetime
@@ -15,14 +14,6 @@ from auth_bearer import *
 app = FastAPI()
 
 models.Base.metadata.create_all(bind=engine)
-
-
-def get_db():
-    try:
-        db = Session_local()
-        yield db
-    finally:
-        db.close()
 
 
 class Create_user(BaseModel):
@@ -40,10 +31,6 @@ class Otp(BaseModel):
 class Login(BaseModel):
     email: str = Field(min_length=1,max_length=100)
     password: str = Field(min_length=1,max_length=100)
-# class VerifyOtp(BaseModel):
-#     phone_no: str = Field(min_length=1, max_length=100)
-#     otp: str = Field(min_length=1,max_length=100)
-#     authentication: int = Field(lt=-1,gt=1)
 
 
 user_list = []
@@ -118,13 +105,16 @@ def login(user:Login,db:Session = Depends(get_db)):
             raise HTTPException(status_code=404,detail="email id not registered")
         password = user.password
         hashed_password = check.password
-        if bcrypt.checkpw(password.encode('utf-8'),hashed_password.encode('utf-8')):
+        if not bcrypt.checkpw(password.encode('utf-8'),hashed_password.encode('utf-8')):
+            raise HTTPException(status_code=401,detail="enter valid password")
+        else:
             user_details.email = user.email
             token = signJWT(check.id)
             user_details.token = token['access_token']
             user_details.timezone = str(datetime.now())
             db.add(user_details)
             db.commit()
+
         # else:
         #     raise HTTPException(status_code=401,detail="Enter valid password")
         return f"token : {token['access_token']}"
@@ -163,7 +153,7 @@ def edit(user_id : int, user:Create_user,db:Session = Depends(get_db)):
 
 
 @app.delete('/{user_id}',dependencies=[Depends(JWTBearer())])
-def delete(user_id : int,db:Session = Depends(get_db)):
+def delete(user_id: int,db: Session = Depends(get_db)):
     del_user = db.query(models.Users).filter(models.Users.id == user_id).first()
     if del_user is None:
         raise HTTPException(status_code=404,
